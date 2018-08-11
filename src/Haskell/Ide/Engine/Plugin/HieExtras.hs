@@ -5,7 +5,6 @@
 {-# LANGUAGE TypeFamilies        #-}
 module Haskell.Ide.Engine.Plugin.HieExtras
   ( getDynFlags
-  , getSymbols
   , getCompletions
   , getTypeForName
   , getSymbolsAtPoint
@@ -13,12 +12,12 @@ module Haskell.Ide.Engine.Plugin.HieExtras
   , getModule
   , findDef
   , showName
+  , safeTyThingId
   ) where
 
 import           ConLike
 import           Control.Monad.State
 import           Data.Aeson
-import           Data.Either
 import           Data.IORef
 import qualified Data.List                                    as List
 import qualified Data.Map                                     as Map
@@ -31,9 +30,9 @@ import           Data.Typeable
 import           DataCon
 import           Exception
 import           FastString
+import           Finder
 import           GHC
 import qualified GhcMod.Error                                 as GM
-import qualified GhcMod.Gap                                   as GM
 import qualified GhcMod.LightGhc                              as GM
 import           Haskell.Ide.Engine.ArtifactMap
 import           Haskell.Ide.Engine.MonadFunctions
@@ -42,7 +41,7 @@ import           Haskell.Ide.Engine.PluginUtils
 import qualified Haskell.Ide.Engine.Plugin.Fuzzy              as Fuzzy
 import           HscTypes
 import qualified Language.Haskell.LSP.Types                   as J
-import           Language.Haskell.Refact.API                 (showGhc, hsNamessRdr)
+import           Language.Haskell.Refact.API                 (showGhc)
 import           Language.Haskell.Refact.Utils.MonadFunctions
 import           Name
 import           Outputable                                   (Outputable)
@@ -57,7 +56,7 @@ getDynFlags :: Uri -> IdeM (IdeResponse DynFlags)
 getDynFlags uri =
   pluginGetFileResponse "getDynFlags: " uri $ \fp ->
     withCachedModule fp (return . IdeResponseOk . ms_hspp_opts . pm_mod_summary . tm_parsed_module . tcMod)
-    
+
 -- ---------------------------------------------------------------------
 
 data NameMapData = NMD
@@ -71,90 +70,6 @@ instance ModuleCache NameMapData where
   cacheDataProducer cm = pure $ NMD inm
     where nm  = initRdrNameMap $ tcMod cm
           inm = invert nm
-
--- ---------------------------------------------------------------------
-
-getSymbols :: Uri -> IdeM (IdeResponse [J.SymbolInformation])
-getSymbols uri = pluginGetFileResponse "getSymbols: " uri $ \file -> withCachedModule file $ \cm -> do
-  let tm = tcMod cm
-      rfm = revMap cm
-      hsMod = unLoc $ pm_parsed_source $ tm_parsed_module tm
-      imports = hsmodImports hsMod
-      imps  = concatMap (goImport . unLoc) imports
-      decls = concatMap (go . unLoc) $ hsmodDecls hsMod
-      s x = showName <$> x
-
-      go :: HsDecl GM.GhcPs -> [(J.SymbolKind,Located T.Text,Maybe T.Text)]
-      go (TyClD FamDecl { tcdFam = FamilyDecl { fdLName = n } }) = pure (J.SkClass, s n, Nothing)
-      go (TyClD SynDecl { tcdLName = n }) = pure (J.SkClass, s n, Nothing)
-      go (TyClD DataDecl { tcdLName = n, tcdDataDefn = HsDataDefn { dd_cons = cons } }) =
-        (J.SkClass, s n, Nothing) : concatMap (processCon (unLoc $ s n) . unLoc) cons
-      go (TyClD ClassDecl { tcdLName = n, tcdSigs = sigs, tcdATs = fams }) =
-        (J.SkInterface, sn, Nothing) :
-              concatMap (processSig (unLoc sn) . unLoc) sigs
-          ++  concatMap (map setCnt . go . TyClD . FamDecl . unLoc) fams
-        where sn = s n
-              setCnt (k,n',_) = (k,n',Just (unLoc sn))
-      go (ValD FunBind { fun_id = ln }) = pure (J.SkFunction, s ln, Nothing)
-      go (ValD PatBind { pat_lhs = p }) =
-        map (\n ->(J.SkMethod, s n, Nothing)) $ hsNamessRdr p
-      go (ForD ForeignImport { fd_name = n }) = pure (J.SkFunction, s n, Nothing)
-      go _ = []
-
-      processSig :: T.Text
-                  -> Sig GM.GhcPs
-                  -> [(J.SymbolKind, Located T.Text, Maybe T.Text)]
-      processSig cnt (ClassOpSig False names _) =
-        map (\n ->(J.SkMethod,s n, Just cnt)) names
-      processSig _ _ = []
-
-      processCon :: T.Text
-                  -> ConDecl GM.GhcPs
-                  -> [(J.SymbolKind, Located T.Text, Maybe T.Text)]
-      processCon cnt ConDeclGADT { con_names = names } =
-        map (\n -> (J.SkConstructor, s n, Just cnt)) names
-      processCon cnt ConDeclH98 { con_name = name, con_details = dets } =
-        (J.SkConstructor, sn, Just cnt) : xs
-        where
-          sn = s name
-          xs = case dets of
-            RecCon (L _ rs) -> concatMap (map (f . rdrNameFieldOcc . unLoc)
-                                          . cd_fld_names
-                                          . unLoc) rs
-                                  where f ln = (J.SkField, s ln, Just (unLoc sn))
-            _ -> []
-
-      goImport :: ImportDecl GM.GhcPs -> [(J.SymbolKind, Located T.Text, Maybe T.Text)]
-      goImport ImportDecl { ideclName = lmn, ideclAs = as, ideclHiding = meis } = a ++ xs
-        where
-          im = (J.SkModule, lsmn, Nothing)
-          lsmn = s lmn
-          smn = unLoc lsmn
-          a = case as of
-                    Just a' -> [(J.SkNamespace, lsmn, Just $ showName a')]
-                    Nothing -> [im]
-          xs = case meis of
-                  Just (False, eis) -> concatMap (f . unLoc) (unLoc eis)
-                  _ -> []
-          f (IEVar n) = pure (J.SkFunction, s n, Just smn)
-          f (IEThingAbs n) = pure (J.SkClass, s n, Just smn)
-          f (IEThingAll n) = pure (J.SkClass, s n, Just smn)
-          f (IEThingWith n _ vars fields) =
-            let sn = s n in
-            (J.SkClass, sn, Just smn) :
-                  map (\n' -> (J.SkFunction, s n', Just (unLoc sn))) vars
-              ++ map (\f' -> (J.SkField   , s f', Just (unLoc sn))) fields
-          f _ = []
-
-      declsToSymbolInf :: (J.SymbolKind, Located T.Text, Maybe T.Text)
-                        -> IdeM (Either T.Text J.SymbolInformation)
-      declsToSymbolInf (kind, L l nameText, cnt) = do
-        eloc <- srcSpan2Loc rfm l
-        case eloc of
-          Left x -> return $ Left x
-          Right loc -> return $ Right $ J.SymbolInformation nameText kind loc cnt
-  symInfs <- mapM declsToSymbolInf (imps ++ decls)
-  return $ IdeResponseOk $ rights symInfs   
 
 -- ---------------------------------------------------------------------
 
@@ -447,14 +362,17 @@ getModule df n = do
 -- | Return the definition
 findDef :: Uri -> Position -> IdeM (IdeResponse [Location])
 findDef uri pos = pluginGetFileResponse "findDef: " uri $ \file ->
-    withCachedModuleDefault file (Just (IdeResponseOk []))
-      (\cm -> do
-        let rfm = revMap cm
-            lm = locMap cm
-        case symbolFromTypecheckedModule lm =<< newPosToOld cm pos of
+    withCachedModuleDefault file (Just (IdeResponseOk [])) (\cm -> do
+      let rfm = revMap cm
+          lm = locMap cm
+          mm = moduleMap cm
+          oldPos = newPosToOld cm pos
+
+      case (\x -> Just $ getArtifactsAtPos x mm) =<< oldPos of
+        Just ((_,mn):_) -> gotoModule rfm mn
+        _ -> case symbolFromTypecheckedModule lm =<< oldPos of
           Nothing -> return $ IdeResponseOk []
-          Just pn -> do
-            let n = snd pn
+          Just (_, n) ->
             case nameSrcSpan n of
               UnhelpfulSpan _ -> return $ IdeResponseOk []
               realSpan   -> do
@@ -476,3 +394,27 @@ findDef uri pos = pluginGetFileResponse "findDef: " uri $ \file ->
                           (IdeError PluginError
                                     ("hare:findDef" <> ": \"" <> x <> "\"")
                                     Null)))
+  where
+    gotoModule :: (FilePath -> FilePath) -> ModuleName -> IdeM (IdeResponse [Location])
+    gotoModule rfm mn = do
+      
+      hscEnvRef <- ghcSession <$> readMTS
+      mHscEnv <- liftIO $ traverse readIORef hscEnvRef
+
+      case mHscEnv of
+        Just env -> do
+          fr <- liftIO $ do
+            -- Flush cache or else we get temporary files
+            flushFinderCaches env
+            findImportedModule env mn Nothing
+          case fr of
+            Found (ModLocation (Just src) _ _) _ -> do
+              fp <- reverseMapFile rfm src
+
+              let r = Range (Position 0 0) (Position 0 0)
+                  loc = Location (filePathToUri fp) r
+              return (IdeResponseOk [loc])
+            _ -> return (IdeResponseOk [])
+        Nothing -> return $ IdeResponseFail
+          (IdeError PluginError "Couldn't get hscEnv when finding import" Null)
+

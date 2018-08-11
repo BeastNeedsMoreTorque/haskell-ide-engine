@@ -22,9 +22,9 @@ defaults: &defaults
 
     - restore_cache:
         keys:
-          - stack-cache-04-{{ arch }}-{{ .Environment.CIRCLE_JOB }}-{{ checksum "stack-build.txt" }}-{{ checksum "all-cabal.txt" }}
-          - stack-cache-04-{{ arch }}-{{ .Environment.CIRCLE_JOB }}-{{ checksum "stack-build.txt" }}
-          - stack-cache-04-{{ arch }}-{{ .Environment.CIRCLE_JOB }}-{{ checksum "resolver.txt" }}
+          - stack-cache-05-{{ arch }}-{{ .Environment.CIRCLE_JOB }}-{{ checksum "stack-build.txt" }}-{{ checksum "all-cabal.txt" }}
+          - stack-cache-05-{{ arch }}-{{ .Environment.CIRCLE_JOB }}-{{ checksum "stack-build.txt" }}
+          - stack-cache-05-{{ arch }}-{{ .Environment.CIRCLE_JOB }}-{{ checksum "resolver.txt" }}
 
     - run:
         name: Stack setup
@@ -39,44 +39,48 @@ defaults: &defaults
         command: stack --stack-yaml=${STACK_FILE} install hoogle
 
     - run:
-        name: Compile but do not run tests
-        command: stack -j 2 --stack-yaml=${STACK_FILE} test --no-run-tests
+        name: Build
+        command: stack -j 2 --stack-yaml=${STACK_FILE} install
+
+    - store_artifacts:
+        path: ~/.local/bin
+        destination: bin
 
     - run:
         name: Generate Hoogle database
         command: stack --stack-yaml=${STACK_FILE} exec hoogle generate
 
     - save_cache:
-        key: stack-cache-04-{{ arch }}-{{ .Environment.CIRCLE_JOB }}-{{ checksum "resolver.txt" }}
+        key: stack-cache-05-{{ arch }}-{{ .Environment.CIRCLE_JOB }}-{{ checksum "resolver.txt" }}
         paths:
           - ~/.stack
           - ~/.cache
 
     - restore_cache:
-          key: stack-work-dirs-04-{{ arch }}-{{ .Environment.CIRCLE_JOB }}-{{ checksum "stack-build.txt" }}
+          key: stack-work-dirs-05-{{ arch }}-{{ .Environment.CIRCLE_JOB }}-{{ checksum "stack-build.txt" }}
 
     - run:
-        name: Compile + Test
-        command: stack -j 1 --stack-yaml=${STACK_FILE} test --dump-logs
+        name: Test
+        command: stack -j 2 --stack-yaml=${STACK_FILE} test --dump-logs
         no_output_timeout: 120m
 
     - store_artifacts:
         path: test-logs
 
     - save_cache:
-        key: stack-cache-04-{{ arch }}-{{ .Environment.CIRCLE_JOB }}-{{ checksum "stack-build.txt" }}
+        key: stack-cache-05-{{ arch }}-{{ .Environment.CIRCLE_JOB }}-{{ checksum "stack-build.txt" }}
         paths:
           - ~/.stack
           - ~/.cache
 
     - save_cache:
-        key: stack-cache-04-{{ arch }}-{{ .Environment.CIRCLE_JOB }}-{{ checksum "stack-build.txt" }}-{{ checksum "all-cabal.txt" }}
+        key: stack-cache-05-{{ arch }}-{{ .Environment.CIRCLE_JOB }}-{{ checksum "stack-build.txt" }}-{{ checksum "all-cabal.txt" }}
         paths:
           - ~/.stack
           - ~/.cache
 
     - save_cache:
-        key: stack-work-dirs-04-{{ arch }}-{{ .Environment.CIRCLE_JOB }}-{{ checksum "stack-build.txt" }}
+        key: stack-work-dirs-05-{{ arch }}-{{ .Environment.CIRCLE_JOB }}-{{ checksum "stack-build.txt" }}
         paths:
           - ~/build/.stack-work
           - ~/build/hie-plugin-api/.stack-work
@@ -113,6 +117,36 @@ jobs:
       - STACK_FILE: "stack.yaml"
     <<: *defaults
 
+  cabal:
+    working_directory: ~/build
+    docker:
+      - image: quay.io/haskell_works/ghc-8.4.3
+    steps:
+      - checkout
+      - run:
+          name: Sync submodules
+          command: git submodule sync --recursive
+      - run:
+          name: Update submodules
+          command: git submodule update --recursive --init
+      - restore-cache:
+          keys:
+            - cabal-02
+      - run:
+          name: Update
+          command: cabal new-update
+      - run:
+          name: Configure
+          command: cabal new-configure --enable-tests
+      - run:
+          name: Build
+          command: cabal new-build -j2
+      - save_cache:
+          key: cabal-02
+          paths:
+            - ~/.cabal
+
+
 workflows:
   version: 2
   multiple-ghcs:
@@ -122,4 +156,4 @@ workflows:
       - ghc-8.4.2
       - ghc-8.4.3
       - ghc-nightly
-
+      - cabal

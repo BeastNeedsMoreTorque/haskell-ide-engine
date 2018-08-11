@@ -41,6 +41,10 @@ baseDescriptor = PluginDescriptor
       , PluginCommand "commands" "list available commands for a given plugin" commandsCmd
       , PluginCommand "commandDetail" "list parameters required for a given command" commandDetailCmd
       ]
+  , pluginCodeActionProvider = Nothing
+  , pluginDiagnosticProvider = Nothing
+  , pluginHoverProvider = Nothing
+  , pluginSymbolProvider = Nothing
   }
 
 -- ---------------------------------------------------------------------
@@ -61,7 +65,7 @@ commandsCmd = CmdSync $ \p -> do
       , ideMessage = "Can't find plugin:" <> p
       , ideInfo = toJSON p
       }
-    Just pl -> return $ IdeResultOk $ map commandName pl
+    Just pl -> return $ IdeResultOk $ map commandName $ pluginCommands pl
 
 commandDetailCmd :: CommandFunc (T.Text, T.Text) T.Text
 commandDetailCmd = CmdSync $ \(p,command) -> do
@@ -72,7 +76,7 @@ commandDetailCmd = CmdSync $ \(p,command) -> do
       , ideMessage = "Can't find plugin:" <> p
       , ideInfo = toJSON p
       }
-    Just pl -> case find (\cmd -> command == (commandName cmd) ) pl of
+    Just pl -> case find (\cmd -> command == commandName cmd) (pluginCommands pl) of
       Nothing -> return $ IdeResultFail $ IdeError
         { ideCode = UnknownCommand
         , ideMessage = "Can't find command:" <> command
@@ -114,7 +118,7 @@ getProjectGhcVersion = do
     else do
       L.infoM "hie" "Using plain GHC version"
       tryCommand "ghc --version"
-          
+
   where
     tryCommand cmd =
       crackGhcVersion <$> readCreateProcess (shell cmd) ""
@@ -125,5 +129,10 @@ getProjectGhcVersion = do
 
 hieGhcVersion :: String
 hieGhcVersion = VERSION_ghc
+
+-- ---------------------------------------------------------------------
+
+checkCabalInstall :: IO Bool
+checkCabalInstall = isJust <$> findExecutable "cabal"
 
 -- ---------------------------------------------------------------------

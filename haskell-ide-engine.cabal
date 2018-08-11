@@ -1,5 +1,5 @@
 name:                haskell-ide-engine
-version:             0.2.1.0
+version:             0.2.2.0
 synopsis:            Provide a common engine to power any Haskell IDE
 description:         Please see README.md
 homepage:            http://github.com/githubuser/haskell-ide-engine#readme
@@ -36,6 +36,7 @@ library
                        Haskell.Ide.Engine.Plugin.HieExtras
                        Haskell.Ide.Engine.Plugin.Hoogle
                        Haskell.Ide.Engine.Plugin.HsImport
+                       Haskell.Ide.Engine.Plugin.Liquid
                        Haskell.Ide.Engine.Plugin.Package
                        Haskell.Ide.Engine.Transport.JsonStdio
                        Haskell.Ide.Engine.Transport.LspStdio
@@ -49,11 +50,10 @@ library
                      , apply-refact
                      , async
                      , base >= 4.9 && < 5
-                     , bimap
                      , brittany
                      , bytestring
                      , Cabal
-                     , cabal-helper >= 0.8.0.4
+                     , cabal-helper >= 0.8.1.0
                      , containers
                      , data-default
                      , directory
@@ -65,7 +65,7 @@ library
                      , gitrev >= 1.1
                      , haddock-api
                      , haddock-library
-                     , haskell-lsp >= 0.3.0
+                     , haskell-lsp >= 0.5
                      , haskell-src-exts
                      , hie-plugin-api
                      , hlint >= 2.0.11
@@ -77,6 +77,7 @@ library
                      , monoid-subclasses > 0.4
                      , mtl
                      , optparse-simple >= 0.0.3
+                     , parsec
                      , process
                      , sorted-list >= 0.2.1.0
                      , stm
@@ -109,7 +110,6 @@ executable hie
                      , hie-plugin-api
                      , hslogger
                      , optparse-simple
-                     , process
                      , stm
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N -Wall -Wredundant-constraints
                        -with-rtsopts=-T
@@ -124,6 +124,7 @@ executable hie-wrapper
   other-modules:       Paths_haskell_ide_engine
   build-depends:       base
                      , directory
+                     , ghc-mod-core
                      , haskell-ide-engine
                      , haskell-lsp
                      , hie-plugin-api
@@ -137,9 +138,10 @@ executable hie-wrapper
   default-language:    Haskell2010
 
 
-test-suite haskell-ide-test
+test-suite unit-test
   type:                exitcode-stdio-1.0
-  hs-source-dirs:      test
+  hs-source-dirs:      test/unit
+                     , test/utils
   main-is:             Main.hs
   other-modules:       ApplyRefactPluginSpec
                        BrittanySpec
@@ -147,111 +149,151 @@ test-suite haskell-ide-test
                        DiffSpec
                        ExtensibleStateSpec
                        GhcModPluginSpec
+                       LiquidSpec
                        HaRePluginSpec
                        HooglePluginSpec
                        JsonSpec
                        Spec
+
                        TestUtils
   build-depends:       QuickCheck
                      , aeson
                      , base
+                     , bytestring
                      , containers
-                     , data-default
                      , directory
                      , filepath
-                     , ghc-mod-core
                      , haskell-lsp
                      , haskell-ide-engine
+                     -- , hie-test-utils
                      , hie-plugin-api
                      , hoogle > 5.0.11
-                     , hslogger
                      , hspec
                      , quickcheck-instances
-                     , stm
                      , text
                      , unordered-containers
+
+                     -- remove these once hie-test-utils is reinstated
+                     , data-default
+                     , hie-plugin-api
+                     , ghc-mod-core
+                     , hslogger
                      , yaml
+
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N -Wall -Wredundant-constraints
   if flag(pedantic)
      ghc-options:      -Werror
   default-language:    Haskell2010
   build-tool-depends:  hspec-discover:hspec-discover
 
-test-suite haskell-ide-dispatcher-test
+test-suite dispatcher-test
   type:                exitcode-stdio-1.0
-  hs-source-dirs:      test
-  main-is:             MainDispatcher.hs
-  other-modules:       ApplyRefactPluginSpec
-                       BrittanySpec
-                       CodeActionsSpec
-                       DiffSpec
-                       ExtensibleStateSpec
-                       GhcModPluginSpec
-                       HaRePluginSpec
-                       HooglePluginSpec
-                       JsonSpec
-                       Spec
-                       TestUtils
-  build-depends:       QuickCheck
-                     , aeson
-                     , base
-                     , containers
-                     , data-default
-                     , directory
-                     , filepath
-                     , ghc-mod-core
-                     , haskell-lsp
-                     , haskell-ide-engine
-                     , hie-plugin-api
-                     , hoogle > 5.0.11
-                     , hslogger
-                     , hspec
-                     , quickcheck-instances
-                     , stm
-                     , text
-                     , unordered-containers
-                     , yaml
-  ghc-options:         -threaded -rtsopts -with-rtsopts=-N -Wall -Wredundant-constraints
-  if flag(pedantic)
-     ghc-options:      -Werror
-  default-language:    Haskell2010
-  build-tool-depends:  hspec-discover:hspec-discover
-
-
-test-suite haskell-ide-func-test
-  type:                exitcode-stdio-1.0
-  hs-source-dirs:      test
-  main-is:             Functional.hs
+  hs-source-dirs:      test/dispatcher
+                       test/utils
+  main-is:             Main.hs
   other-modules:       TestUtils
-                       FunctionalDispatch
-                       FunctionalCodeActions
+  build-depends:       base
+                     , aeson
+                     , containers
+                     , data-default
+                     , directory
+                     , filepath
+                     , haskell-lsp
+                     , haskell-ide-engine
+                     -- , hie-test-utils
+                     , hie-plugin-api
+                     , hspec
+                     , stm
+                     , text
+                     , unordered-containers
+
+                     -- remove these once hie-test-utils is reinstated
+                     , hie-plugin-api
+                     , ghc-mod-core
+                     , hslogger
+                     , unordered-containers
+                     , yaml
+  ghc-options:         -threaded -rtsopts -with-rtsopts=-N -Wall -Wredundant-constraints
+  if flag(pedantic)
+     ghc-options:      -Werror
+  default-language:    Haskell2010
+  build-tool-depends:  hspec-discover:hspec-discover
+
+-- library hie-test-utils
+--   hs-source-dirs:      test/utils
+--   exposed-modules:     TestUtils
+--   build-depends:       base
+--                      , haskell-ide-engine
+--                      , haskell-lsp
+--                      , hie-plugin-api
+--                      , aeson
+--                      , containers
+--                      , data-default
+--                      , directory
+--                      , filepath
+--                      , ghc-mod-core
+--                      , hslogger
+--                      , hspec
+--                      , text
+--                      , unordered-containers
+--                      , yaml
+--   ghc-options:         -Wall -Wredundant-constraints
+--   if flag(pedantic)
+--      ghc-options:      -Werror
+--   default-language:    Haskell2010
+
+test-suite func-test
+  type:                exitcode-stdio-1.0
+  hs-source-dirs:      test/functional
+                     , test/utils
+  main-is:             Main.hs
+  other-modules:       CompletionSpec
+                     , CommandSpec
+                     , CodeActionsSpec
+                     , DeferredSpec
+                     , DefinitionSpec
+                     , DiagnosticsSpec
+                     , FormatSpec
+                     , HighlightSpec
+                     , HoverSpec
+                     , ReferencesSpec
+                     , RenameSpec
+                     , SymbolsSpec
+                     , Spec
+
+                     , TestUtils
   build-depends:       aeson
                      , base
                      , containers
                      , data-default
                      , directory
                      , filepath
-                     , ghc-mod-core
-                     , haskell-lsp
-                     , haskell-lsp-test
+                     , lsp-test >= 0.2
                      , haskell-ide-engine
+                     -- , hie-test-utils
                      , hie-plugin-api
-                     , hslogger
                      , hspec
                      , lens
                      , stm
                      , text
                      , unordered-containers
+
+                     -- remove these once hie-test-utils is reinstated
+                     , hie-plugin-api
+                     , ghc-mod-core
+                     , hslogger
+                     , unordered-containers
                      , yaml
+                     , haskell-lsp
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N -Wall -Wredundant-constraints
   if flag(pedantic)
      ghc-options:      -Werror
   default-language:    Haskell2010
   build-tool-depends:  hspec-discover:hspec-discover
 
-test-suite hie-wrapper-test
+test-suite wrapper-test
   type:                exitcode-stdio-1.0
-  hs-source-dirs:      test
+  hs-source-dirs:      test/wrapper
   main-is:             HieWrapper.hs
   build-depends:       base
                      , hspec

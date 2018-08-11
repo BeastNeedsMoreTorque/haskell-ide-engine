@@ -42,6 +42,10 @@ testDescriptor = PluginDescriptor
         PluginCommand "cmd1" "description" cmd1
       , PluginCommand "cmd2" "description" cmd2
       ]
+  , pluginCodeActionProvider = Nothing
+  , pluginDiagnosticProvider = Nothing
+  , pluginHoverProvider = Nothing
+  , pluginSymbolProvider = Nothing
   }
 
 -- ---------------------------------------------------------------------

@@ -3,11 +3,14 @@
 
 [![License BSD3][badge-license]][license]
 [![CircleCI][badge-circleci]][circleci]
+[![AppVeyor][badge-appveyor]][appveyor]
 
 [badge-license]: https://img.shields.io/badge/license-BSD3-green.svg?dummy
 [license]: https://github.com/haskell/haskell-ide-engine/blob/master/LICENSE
 [badge-circleci]: https://img.shields.io/circleci/project/github/haskell/haskell-ide-engine.svg
 [circleci]: https://circleci.com/gh/haskell/haskell-ide-engine/
+[badge-appveyor]: https://ci.appveyor.com/api/projects/status/6hit7mxvgdrao3q0?svg=true
+[appveyor]: https://ci.appveyor.com/project/Bubba/haskell-ide-engine-74xec
 
 
 This project aims to be __the universal interface__ to __a growing number of Haskell tools__, providing a __full-featured and easy to query backend__ for editors and IDEs that require Haskell-specific functionality.
@@ -28,7 +31,6 @@ we talk to clients.__
         - [Planned Features](#planned-features)
         - [This is *not* yet another `ghc-mod` or `ide-backend` project](#this-is-not-yet-another-ghc-mod-or-ide-backend-project)
         - [It's time to join the project!](#its-time-to-join-the-project)
-        - [Development](#development)
     - [Architecture](#architecture)
         - [1. BIOS layer](#1-bios-layer)
         - [2. Plugin layer](#2-plugin-layer)
@@ -76,9 +78,19 @@ we talk to clients.__
 
    ![Renaming](https://i.imgur.com/z03G2a5.gif)
 
- - Adding chosen import and the package dependencies (vscode only)
+ - Add packages to cabal and hpack package files
 
+   ![Adding package to hpack](https://user-images.githubusercontent.com/2488460/43036067-20ae5964-8cf2-11e8-9951-4fd849b3f735.gif)
    ![Adding import & deps](https://user-images.githubusercontent.com/1387653/40287051-b6f987fe-5c5f-11e8-980f-ed7bfa1b2aec.gif)
+
+ - Typo quick fixes
+
+   ![Quick fixes](https://user-images.githubusercontent.com/2488460/43036093-746ae176-8cf2-11e8-8b2d-59799b21c283.gif)
+
+ - Add missing imports (via hsimport)
+
+   ![Missing imports](https://user-images.githubusercontent.com/2488460/43036113-9bb5d5b0-8cf2-11e8-8e32-20952378cf2b.gif)
+
 
 ## Installation
 
@@ -114,6 +126,15 @@ $ git submodule update --init
 ### Installation with stack
 
 To install HIE, you need Stack version >= 1.7.1
+
+In order to support both stack and cabal, `hie` requires `cabal-install`
+as well.
+
+If it is not already installed, install it, one of the ways is
+
+```bash
+stack install cabal-install
+```
 
 To install all supported GHC versions, name them as expected by the VS Code
 plugin, and also build a local hoogle database, you need the `make` tool (on
@@ -251,6 +272,35 @@ All of the editor integrations assume that you have already installed HIE (see a
 Install from
 [the VSCode marketplace](https://marketplace.visualstudio.com/items?itemName=alanz.vscode-hie-server), or manually from the repository [vscode-hie-server](https://github.com/alanz/vscode-hie-server).
 
+#### Using VS Code with Nix
+
+`.config/nixpkgs/config.nix` sample:
+
+``` nix
+with import <nixpkgs> {};
+
+let
+  hie = (import (fetchFromGitHub {
+                   owner="domenkozar";
+                   repo="hie-nix";
+                   rev="e3113da";
+                   sha256="05rkzjvzywsg66iafm84xgjlkf27yfbagrdcb8sc9fd59hrzyiqk";
+                 }) {}).hie84;
+in
+{
+  allowUnfree = true;
+  packageOverrides = pkgs: rec {
+
+    vscode = pkgs.vscode.overrideDerivation (old: {
+      postFixup = old.postFixup + ''
+        wrapProgram $out/bin/code --prefix PATH : ${lib.makeBinPath [hie]}
+      '';
+    });
+
+  };
+}
+```
+
 ### Using HIE with Sublime Text
 
 * Make sure HIE is installed (see above) and that the directory stack put the `hie` binary in is in your path
@@ -262,7 +312,7 @@ Install from
 ```
 "clients": {
   "haskell-ide-engine": {
-    "command": ["hie", "--lsp"],
+    "command": ["hie"],
     "scopes": ["source.haskell"],
     "syntaxes": ["Packages/Haskell/Haskell.sublime-syntax"],
     "languageId": "haskell",
@@ -297,7 +347,7 @@ Finally, make sure that `hie` is included as the language server source for hask
 ```
 let g:LanguageClient_serverCommands = {
     ...
-    \ 'haskell': ['hie-wrapper', '--lsp'],
+    \ 'haskell': ['hie-wrapper'],
     ...
     \ }
 ```
@@ -307,7 +357,7 @@ Since LanguageClient-neovim doesn't start language servers in the project root, 
 ```
 let g:LanguageClient_serverCommands = {
     ...
-    \ 'haskell': ['hie-wrapper', '--lsp', '-r', '$YOURROOTHERE'],
+    \ 'haskell': ['hie-wrapper', '-r', '$YOURROOTHERE'],
     ...
     \ }
 
@@ -367,7 +417,7 @@ and then activate [`lsp-haskell`](https://github.com/emacs-lsp/lsp-haskell) in y
   )
 ```
 
-Now you should be able to use HIE in Spacemacs. I recommend still checking out [lsp-ui](https://github.com/emacs-lsp/lsp-ui) and [lsp-mode](https://github.com/emacs-lsp/lsp-mode).
+Now you should be able to use HIE in Spacemacs. I still recommend checking out [lsp-ui](https://github.com/emacs-lsp/lsp-ui) and [lsp-mode](https://github.com/emacs-lsp/lsp-mode).
 
 ### Using HIE with Oni
 
@@ -376,7 +426,7 @@ Now you should be able to use HIE in Spacemacs. I recommend still checking out [
 ```js
 export const configuration = {
   "language.haskell.languageServer.command": "stack",
-  "language.haskell.languageServer.arguments": ["exec", "--", "hie", "--lsp"],
+  "language.haskell.languageServer.arguments": ["exec", "--", "hie"],
   "language.haskell.languageServer.rootFiles": [".git"],
   "language.haskell.languageServer.configuration": {},
 }
@@ -439,15 +489,6 @@ This project is not started from scratch:
  - Join [our IRC channel](https://webchat.freenode.net/?channels=haskell-ide-engine) at `#haskell-ide-engine` on `freenode`.
  - Fork this repo and hack as much as you can.
  - Ask @alanz or @hvr to join the project.
-
-### Development
-
-Apart from stack you need [cask](https://cask.readthedocs.org/en/latest/) for the emacs tests. You can install it using
-
-```
-curl -fsSL https://raw.githubusercontent.com/cask/cask/master/go | python
-```
-
 
 ## Architecture
 

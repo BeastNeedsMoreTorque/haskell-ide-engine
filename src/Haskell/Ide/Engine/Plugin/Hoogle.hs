@@ -32,6 +32,10 @@ hoogleDescriptor = PluginDescriptor
       [ PluginCommand "info" "Look up the documentation for an identifier in the hoogle database" infoCmd
       , PluginCommand "lookup" "Search the hoogle database with a string" lookupCmd
       ]
+  , pluginCodeActionProvider = Nothing
+  , pluginDiagnosticProvider = Nothing
+  , pluginHoverProvider = Nothing
+  , pluginSymbolProvider = Nothing
   }
 
 -- ---------------------------------------------------------------------
@@ -107,19 +111,19 @@ renderTarget t = T.intercalate "\n\n" $
 
 ------------------------------------------------------------------------
 
-searchModules :: T.Text -> IdeM (IdeResponse [T.Text])
-searchModules = fmap (fmap (nub . take 5)) . searchTargets (fmap (T.pack . fst) . targetModule)
+searchModules :: T.Text -> IdeM [T.Text]
+searchModules = fmap (nub . take 5) . searchTargets (fmap (T.pack . fst) . targetModule)
 
-searchPackages :: T.Text -> IdeM (IdeResponse [T.Text])
-searchPackages = fmap (fmap (nub . take 5)) . searchTargets (fmap (T.pack . fst) . targetPackage)
+searchPackages :: T.Text -> IdeM [T.Text]
+searchPackages = fmap (nub . take 5) . searchTargets (fmap (T.pack . fst) . targetPackage)
 
-searchTargets :: (Target -> Maybe a) -> T.Text -> IdeM (IdeResponse [a])
+searchTargets :: (Target -> Maybe a) -> T.Text -> IdeM [a]
 searchTargets f term = do
   HoogleDb mdb <- get
   res <- liftIO $ runHoogleQuery mdb term (Right . mapMaybe f . take 10)
   case bimap hoogleErrorToIdeError id res of
-    Left err -> return $ IdeResponseFail err
-    Right xs -> return $ IdeResponseOk xs
+    Left _ -> return []
+    Right xs -> return xs
 
 ------------------------------------------------------------------------
 
@@ -147,6 +151,28 @@ runHoogleQuery (Just db) quer f = do
 searchHoogle :: FilePath -> T.Text -> IO [Target]
 searchHoogle dbf quer = withDatabase dbf (return . flip searchDatabase (T.unpack quer))
 
+------------------------------------------------------------------------
 
+docRules :: Maybe T.Text -> T.Text -> T.Text
+docRules (Just "base") "GHC.Base"    = "Prelude"
+docRules (Just "base") "GHC.Enum"    = "Prelude"
+docRules (Just "base") "GHC.Num"     = "Prelude"
+docRules (Just "base") "GHC.Real"    = "Prelude"
+docRules (Just "base") "GHC.Float"   = "Prelude"
+docRules (Just "base") "GHC.Show"    = "Prelude"
+docRules (Just "containers") modName =
+  fromMaybe modName $ T.stripSuffix ".Base" modName
+docRules _ modName = modName
 
-
+getDocsForName :: T.Text -> Maybe T.Text -> T.Text -> IdeM (Maybe T.Text)
+getDocsForName name pkg modName' = do
+  let modName = docRules pkg modName'
+      query = name
+           <> maybe "" (T.append " package:") pkg
+           <> " module:" <> modName
+           <> " is:exact"
+  debugm $ "hoogle query: " ++ T.unpack query
+  res <- infoCmdFancyRender query
+  case res of
+    Right x -> return $ Just x
+    Left _ -> return Nothing

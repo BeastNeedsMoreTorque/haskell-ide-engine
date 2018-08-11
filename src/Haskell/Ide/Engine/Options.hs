@@ -7,14 +7,16 @@ import           Data.Semigroup             hiding (option)
 import           Options.Applicative.Simple
 
 data GlobalOpts = GlobalOpts
-  { optDebugOn     :: Bool
-  , optLogFile     :: Maybe String
-  , optLsp         :: Bool
-  , projectRoot    :: Maybe String
-  , optGhcModVomit :: Bool
-  , optEkg         :: Bool
-  , optEkgPort     :: Int
-  , optCaptureFile :: Maybe FilePath
+  { optDebugOn       :: Bool
+  , optLogFile       :: Maybe String
+  , optLsp           :: Bool
+  , optJson          :: Bool
+  , projectRoot      :: Maybe String
+  , optGhcModVomit   :: Bool
+  , optEkg           :: Bool
+  , optEkgPort       :: Int
+  , optCaptureFile   :: Maybe FilePath
+  , optExamplePlugin :: Bool
   } deriving (Show)
 
 globalOptsParser :: Parser GlobalOpts
@@ -30,18 +32,21 @@ globalOptsParser = GlobalOpts
       <> metavar "LOGFILE"
       <> help "File to log to, defaults to stdout"
        ))
-  <*> flag False True
+  <*> flag True True
        ( long "lsp"
-       <> help "Enable the Language Server Protocol transport on STDIO")
+       <> help "Enable the Language Server Protocol transport on STDIO (default)")
+  <*> switch
+       ( long "json"
+       <> help "Enable JSON transport on STDIO")
   <*> optional (strOption
        ( long "project-root"
       <> short 'r'
       <> metavar "PROJECTROOT"
       <> help "Root directory of project, defaults to cwd"))
-  <*> flag False True
+  <*> switch
        ( long "vomit"
        <> help "enable vomit logging for ghc-mod")
-  <*> flag False True
+  <*> switch
        ( long "ekg"
        <> help "enable ekg collection and display on http://localhost:8000")
   <*> option auto
@@ -57,3 +62,6 @@ globalOptsParser = GlobalOpts
       <> metavar "CAPTUREFILE"
       <> help "File to capture the session to"
        ))
+  <*> switch
+       ( long "example"
+       <> help "Enable Example2 plugin. Useful for developers only")

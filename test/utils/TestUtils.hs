@@ -11,6 +11,7 @@ module TestUtils
   , runIGM
   , hieCommand
   , hieCommandVomit
+  , hieCommandExamplePlugin
   ) where
 
 import           Control.Exception
@@ -54,7 +55,7 @@ cdAndDo path fn = do
           $ const fn
 
 
-testCommand :: (ToJSON a, Typeable b, ToJSON b, Show b, Eq b) => IdePlugins -> IdeGhcM (IdeResult b) -> PluginId -> CommandName -> a -> (IdeResult b) -> IO ()
+testCommand :: (ToJSON a, Typeable b, ToJSON b, Show b, Eq b) => IdePlugins -> IdeGhcM (IdeResult b) -> PluginId -> CommandName -> a -> IdeResult b -> IO ()
 testCommand testPlugins act plugin cmd arg res = do
   (newApiRes, oldApiRes) <- runIGM testPlugins $ do
     new <- act
@@ -105,6 +106,8 @@ files =
    , "./test/testdata/addPackageTest/cabal/"
    , "./test/testdata/addPackageTest/hpack/"
    , "./test/testdata/redundantImportTest/"
+   , "./test/testdata/completion/"
+   , "./test/testdata/definition/"
   ]
 
 stackYaml :: FilePath
@@ -128,10 +131,13 @@ stackYaml =
 -- run with `stack test`
 hieCommand :: String
 hieCommand = "stack exec --no-stack-exe --no-ghc-package-path --stack-yaml=" ++ stackYaml ++
-             " hie -- --lsp -d -l test-logs/functional-hie-" ++ stackYaml ++ ".log"
+             " hie -- -d -l test-logs/functional-hie-" ++ stackYaml ++ ".log"
 
 hieCommandVomit :: String
 hieCommandVomit = hieCommand ++ " --vomit"
+
+hieCommandExamplePlugin :: String
+hieCommandExamplePlugin = hieCommand ++ " --example"
 
 -- |Choose a resolver based on the current compiler, otherwise HaRe/ghc-mod will
 -- not be able to load the files

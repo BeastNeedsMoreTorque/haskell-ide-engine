@@ -5,9 +5,11 @@
 module Haskell.Ide.Engine.Plugin.ApplyRefact where
 
 import           Control.Arrow
+import           Control.Lens hiding (List)
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Except
 import           Data.Aeson                        hiding (Error)
+import           Data.Maybe
 import           Data.Monoid                       ((<>))
 import qualified Data.Text                         as T
 import           GHC.Generics
@@ -19,6 +21,7 @@ import           Language.Haskell.Exts.SrcLoc
 import           Language.Haskell.Exts.Parser
 import           Language.Haskell.Exts.Extension
 import           Language.Haskell.HLint3           as Hlint
+import qualified Language.Haskell.LSP.Types        as LSP
 import           Refact.Apply
 
 -- ---------------------------------------------------------------------
@@ -39,6 +42,10 @@ applyRefactDescriptor = PluginDescriptor
       , PluginCommand "applyAll" "Apply all hints to the file" applyAllCmd
       , PluginCommand "lint" "Run hlint on the file to generate hints" lintCmd
       ]
+  , pluginCodeActionProvider = Just codeActionProvider
+  , pluginDiagnosticProvider = Nothing
+  , pluginHoverProvider = Nothing
+  , pluginSymbolProvider = Nothing
   }
 
 -- ---------------------------------------------------------------------
@@ -93,6 +100,7 @@ lintCmd :: CommandFunc Uri PublishDiagnosticsParams
 lintCmd = CmdSync $ \uri -> do
   lintCmd' uri
 
+-- AZ:TODO: Why is this in IdeGhcM?
 lintCmd' :: Uri -> IdeGhcM (IdeResult PublishDiagnosticsParams)
 lintCmd' uri = pluginGetFile "lintCmd: " uri $ \fp -> do
       res <- GM.withMappedFile fp $ \file' -> liftIO $ runExceptT $ runLintCmd file' []
@@ -265,3 +273,31 @@ runHlint fp args =
 showParseError :: Hlint.ParseError -> String
 showParseError (Hlint.ParseError location message content) =
   unlines [show location, message, content]
+
+-- ---------------------------------------------------------------------
+
+codeActionProvider :: CodeActionProvider
+codeActionProvider docId _ _ context = return $ IdeResponseOk hlintActions
+  where
+
+    hlintActions = mapMaybe mkHlintAction $ filter validCommand diags
+    -- |Some hints do not have an associated refactoring
+    validCommand (LSP.Diagnostic _ _ (Just code) (Just "hlint") _ _) =
+      case code of
+        "Eta reduce" -> False
+        _            -> True
+    validCommand _ = False
+
+    LSP.List diags = context ^. LSP.diagnostics
+    mkHlintAction :: LSP.Diagnostic -> Maybe LSP.CodeAction
+    mkHlintAction diag@(LSP.Diagnostic (LSP.Range start _) _s (Just code) (Just "hlint") m _) = Just codeAction
+     where
+       codeAction = LSP.CodeAction title (Just LSP.CodeActionRefactor) (Just (LSP.List [diag])) Nothing (Just cmd)
+       title :: T.Text
+       title = "Apply hint:" <> head (T.lines m)
+       cmd = LSP.Command title cmdName cmdparams
+       cmdName = "applyrefact:applyOne"
+       -- need 'file', 'start_pos' and hint title (to distinguish between alternative suggestions at the same location)
+       args = LSP.List [toJSON (AOP (docId ^. LSP.uri) start code)]
+       cmdparams = Just args
+    mkHlintAction (LSP.Diagnostic _r _s _c _source _m _) = Nothing
